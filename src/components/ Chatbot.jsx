@@ -1,8 +1,18 @@
+// src/components/Chatbot.js
 import React, { useState, useRef, useEffect } from 'react';
 import { getLLMResponse } from '../langchain/openrouterService';
 import { retrieveRelevantAdvice } from '../langchain/ragHelper';
+import {
+  getUserGenotype,
+  getUserVitals,
+  getUserBloodPressure,
+  getDoctorAvailability,
+  bookAppointment,
+} from '../services/emrService';
 import { FaPaperPlane, FaUserMd, FaUser, FaSpinner } from 'react-icons/fa';
 import styled, { keyframes } from 'styled-components';
+
+/* ===================== styles (your original look & feel) ===================== */
 
 const fadeIn = keyframes`
   from { opacity: 0; transform: translateY(10px); }
@@ -13,6 +23,10 @@ const pulse = keyframes`
   0% { opacity: 0.6; }
   50% { opacity: 1; }
   100% { opacity: 0.6; }
+`;
+
+const spin = keyframes`
+  to { transform: rotate(360deg); }
 `;
 
 const ChatContainer = styled.div`
@@ -54,7 +68,7 @@ const Message = styled.div`
   position: relative;
   animation: ${fadeIn} 0.3s ease-out;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-  
+
   ${props => props.sender === 'bot' ? `
     align-self: flex-start;
     background: white;
@@ -80,7 +94,7 @@ const SenderIcon = styled.div`
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  
+
   ${props => props.sender === 'bot' ? `
     background: #4b6cb7;
     color: white;
@@ -106,7 +120,7 @@ const InputField = styled.input`
   outline: none;
   font-size: 16px;
   transition: all 0.3s;
-  
+
   &:focus {
     border-color: #4b6cb7;
     box-shadow: 0 0 0 2px rgba(75, 108, 183, 0.2);
@@ -126,26 +140,23 @@ const SendButton = styled.button`
   justify-content: center;
   cursor: pointer;
   transition: all 0.3s;
-  
-  &:hover {
-    transform: scale(1.05);
-  }
-  
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-  }
+
+  &:hover { transform: scale(1.05); }
+  &:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 `;
 
 const TypingIndicator = styled.div`
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   color: #666;
   font-size: 14px;
   margin-top: 10px;
   animation: ${pulse} 1.5s infinite;
+`;
+
+const SpinningIcon = styled(FaSpinner)`
+  animation: ${spin} 1s linear infinite;
 `;
 
 const DoctorAvatar = styled.div`
@@ -158,63 +169,143 @@ const DoctorAvatar = styled.div`
   justify-content: center;
 `;
 
+/* ===================== logic/helpers ===================== */
+
+// Dummy logged-in user
+const userId = 1;
+
+/** Format a list of doctors [{name, specialty}] nicely */
+function formatDoctorList(docs) {
+  if (!docs || docs.length === 0) return 'No doctors available.';
+  return docs.map(d => `${d.name}${d.specialty ? ` (${d.specialty})` : ''}`).join(', ');
+}
+
+/**
+ * Try to resolve EMR-style queries from local services.
+ * Returns either:
+ *  - { text: string, context?: string }  OR
+ *  - null (to fall back to LLM)
+ */
+async function handleUserQuery(input) {
+  const lower = input.toLowerCase().trim();
+
+  // genotype
+  if (lower.includes('genotype')) {
+    const value = getUserGenotype(userId);
+    const text = `Your genotype is: ${value}.`;
+    return { text, context: `Genotype: ${value}` };
+  }
+
+  // blood pressure
+  if (lower.includes('blood pressure') || lower.includes('bp')) {
+    const bp = getUserBloodPressure(userId);
+    const text = `Your blood pressure is: ${bp}.`;
+    return { text, context: `Blood pressure: ${bp}` };
+  }
+
+  // vitals
+  if (lower.includes('vitals') || lower.includes('my vitals')) {
+    const v = getUserVitals(userId);
+    const text =
+      `Here are your vitals:\n` +
+      `• Heart Rate: ${v.heartRate} bpm\n` +
+      `• Temperature: ${v.temperature}\n` +
+      `• Weight: ${v.weight}`;
+    const context = `Vitals -> Heart Rate: ${v.heartRate} bpm; Temperature: ${v.temperature}; Weight: ${v.weight}`;
+    return { text, context };
+  }
+
+  // available doctors (today/tomorrow)
+  if (lower.includes('available doctors')) {
+    const isTomorrow = lower.includes('tomorrow');
+    const target = isTomorrow ? new Date(Date.now() + 86400000) : new Date();
+    const date = target.toISOString().split('T')[0];
+    const docs = getDoctorAvailability(date);
+    const text = `${isTomorrow ? 'Doctors available tomorrow' : 'Doctors available today'}: ${formatDoctorList(docs)}`;
+    return { text, context: `Doctor availability for ${date}: ${formatDoctorList(docs)}` };
+  }
+
+  // book pregnancy test for tomorrow
+  if (lower.includes('book') && lower.includes('pregnancy test') && lower.includes('tomorrow')) {
+    const date = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    const text = bookAppointment(userId, date, 'Pregnancy Test', 'Dr. Aisha');
+    return { text, context: `Booked: Pregnancy Test on ${date} with Dr. Aisha` };
+  }
+
+  return null; // not an EMR query → let LLM handle
+}
+
+/* ===================== component ===================== */
+
 export default function MedicalChatbot() {
   const [messages, setMessages] = useState([
     { sender: 'bot', text: "Hello! I'm Dr. AI. How can I assist you with your medical concerns today?" }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // keep last structured medical info for follow-up questions like "is it normal?"
+  const [lastContext, setLastContext] = useState('');
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  useEffect(() => { scrollToBottom(); }, [messages]);
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
-    
+
     const userMsg = { sender: 'user', text: input };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
 
     try {
-      const retrievedAdvice = await retrieveRelevantAdvice(input);
-      
-      const prompt = `You are a professional medical assistant. Provide clear, concise advice based on the following information.
-      
-Patient Input: "${input}"
+      // 1) Try EMR/local data first
+      const emr = await handleUserQuery(userMsg.text);
 
-Relevant Medical Information: "${retrievedAdvice}"
+      if (emr) {
+        if (emr.context) setLastContext(emr.context);
+        setMessages(prev => [...prev, { sender: 'bot', text: emr.text }]);
+      } else {
+        // 2) Build context-aware prompt for LLM
+        const isFollowUpNormal = userMsg.text.toLowerCase().includes('normal');
+        const contextBlock = isFollowUpNormal && lastContext
+          ? `Patient previously received this data: ${lastContext}`
+          : '';
 
-Provide a professional response that:
-1. Acknowledges the patient's concern
-2. References the relevant medical information when appropriate
-3. Offers clear advice
-4. Suggests when to seek in-person medical attention
-5. Uses simple, non-alarming language
+        const retrievedAdvice = await retrieveRelevantAdvice(userMsg.text);
 
-Response:`;
-      
-      const botText = await getLLMResponse(prompt);
-      setMessages(prev => [...prev, { sender: 'bot', text: botText }]);
+        const prompt = `You are a professional medical assistant. Provide clear, concise, and non-alarming guidance.
+${contextBlock ? contextBlock + '\n' : ''}
+
+Patient Input: "${userMsg.text}"
+Relevant Medical Information (from local RAG): "${retrievedAdvice}"
+
+Instructions:
+- If the question is "is it normal?", use the provided context if available.
+- Give practical next steps, red flags to watch for, and when to seek in-person care.
+- Keep it friendly and brief.`;
+
+        const botText = await getLLMResponse(prompt);
+        setMessages(prev => [...prev, { sender: 'bot', text: botText }]);
+
+        // if LLM produced a direct interpretation of vitals/bp, store as context
+        if (!lastContext && (userMsg.text.toLowerCase().includes('vitals') || userMsg.text.toLowerCase().includes('blood pressure'))) {
+          setLastContext(retrievedAdvice || '');
+        }
+      }
     } catch (error) {
-      setMessages(prev => [...prev, { 
-        sender: 'bot', 
-        text: "I'm sorry, I encountered an error processing your request. Please try again later." 
-      }]);
-      console.error("Chatbot error:", error);
+      console.error('Chatbot error:', error);
+      setMessages(prev => [
+        ...prev,
+        { sender: 'bot', text: "I'm sorry, I encountered an error processing your request. Please try again later." }
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ChatContainer style={{marginTop:'60px'}}>
+    <ChatContainer style={{ marginTop: '60px' }}>
       <ChatHeader>
         <DoctorAvatar>
           <FaUserMd size={20} />
@@ -226,7 +317,7 @@ Response:`;
           </p>
         </div>
       </ChatHeader>
-      
+
       <ChatBody>
         {messages.map((msg, i) => (
           <Message key={i} sender={msg.sender}>
@@ -236,23 +327,23 @@ Response:`;
             {msg.text}
           </Message>
         ))}
-        
+
         {loading && (
           <TypingIndicator>
-            <FaSpinner className="fa-spin" />
+            <SpinningIcon />
             <span>Dr. AI is typing...</span>
           </TypingIndicator>
         )}
-        
+
         <div ref={messagesEndRef} />
       </ChatBody>
-      
+
       <InputContainer>
         <InputField
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && sendMessage()}
-          placeholder="Describe your symptoms or ask a medical question..."
+          placeholder="Describe your symptoms or ask about your records (e.g., 'What is my blood pressure?')"
           disabled={loading}
         />
         <SendButton onClick={sendMessage} disabled={loading || !input.trim()}>
