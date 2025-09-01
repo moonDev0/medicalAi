@@ -20,7 +20,7 @@ export const getLLMResponse = async (prompt) => {
       headers: {
         "Authorization": `Bearer ${'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'}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000", // for free-tier required headers
+        "HTTP-Referer": "https://medical-ai-bice.vercel.app/", // for free-tier required headers
         "X-Title": "langchain-openrouter-chatbot"
       },
       body: JSON.stringify({
