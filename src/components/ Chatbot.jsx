@@ -311,7 +311,7 @@ Instructions:
           <FaUserMd size={20} />
         </DoctorAvatar>
         <div>
-          <h2 style={{ margin: 0 }}>Dr. AI Assistant</h2>
+          <h2 style={{ margin: 0 }}>Medical AI Assistant</h2>
           <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9em' }}>
             {loading ? 'Typing...' : 'Online'}
           </p>

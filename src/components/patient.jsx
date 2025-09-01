@@ -776,7 +776,7 @@ Response:`;
                 <FaUserMd size={16} />
               </div>
               <div>
-                <h3 style={{ margin: 0 }}>Dr. AI Assistant</h3>
+                <h3 style={{ margin: 0 }}> I am your medical AI Assistant</h3>
                 <p style={{ margin: 0, opacity: 0.7, fontSize: '0.8em' }}>
                   {loading ? 'Typing...' : 'Online'}
                 </p>
