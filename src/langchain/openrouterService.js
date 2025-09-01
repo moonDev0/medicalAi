@@ -18,7 +18,7 @@ export const getLLMResponse = async (prompt) => {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${'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'}`,
+        "Authorization": `Bearer ${'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'}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:3000", // for free-tier required headers
         "X-Title": "langchain-openrouter-chatbot"
